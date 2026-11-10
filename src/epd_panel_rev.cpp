@@ -3,6 +3,7 @@
 #include <epd_panel_rev.h>
 #include <globals.h>
 #include <inttypes.h>
+#include <panel_vcom.h>
 
 #ifdef BB_EPAPER
 static void WriteSPIByte(uint8_t data) {
@@ -74,6 +75,47 @@ uint32_t get_panel_rev(void) {
   digitalWrite(pDevice->epd_cs_pin, 1);
   return u32;
 } /* get_panel_rev() */
+
+// Samples while SCK is high, as the UC8179 read timing has it; ReadSPIByte() would drop each byte's MSB
+static uint8_t read_otp_byte(void) {
+  uint8_t u8 = 0;
+  for (int i = 0; i < 8; i++) {
+    delayMicroseconds(2);
+    digitalWrite(pDevice->epd_sck_pin, 1);
+    delayMicroseconds(2);
+    u8 = (u8 << 1) | digitalRead(pDevice->epd_mosi_pin);
+    digitalWrite(pDevice->epd_sck_pin, 0);
+  }
+  return u8;
+}
+
+static int read_panel_vcom(void) {
+  uint8_t *otp = (uint8_t *)malloc(PANEL_OTP_VCOM_READ_BYTES);
+  if (!otp) return -1;
+  digitalWrite(pDevice->epd_dc_pin, 0); // command mode
+  digitalWrite(pDevice->epd_cs_pin, 0);
+  pinMode(pDevice->epd_mosi_pin, OUTPUT);
+  WriteSPIByte(0xA2); // Read OTP (ROTP) command, from address 0
+  digitalWrite(pDevice->epd_dc_pin, 1); // data mode
+  pinMode(pDevice->epd_mosi_pin, INPUT);
+  for (size_t i = 0; i < PANEL_OTP_VCOM_READ_BYTES; i++)
+    otp[i] = read_otp_byte();
+  digitalWrite(pDevice->epd_cs_pin, 1);
+  const int vcom = panelVcomFromOtp(otp, PANEL_OTP_VCOM_READ_BYTES);
+  free(otp);
+  return vcom;
+}
+
+int get_panel_vcom(uint32_t panel_id) {
+  if (panel_id == 0) return -1; // not a panel get_panel_rev() could read
+  if (preferences.getUInt(PREFERENCES_PANEL_VCOM_ID, 0) == panel_id && preferences.isKey(PREFERENCES_PANEL_VCOM)) {
+    return preferences.getInt(PREFERENCES_PANEL_VCOM, -1);
+  }
+  const int vcom = read_panel_vcom();
+  preferences.putInt(PREFERENCES_PANEL_VCOM, vcom);
+  preferences.putUInt(PREFERENCES_PANEL_VCOM_ID, panel_id);
+  return vcom;
+}
 #endif // BB_EPAPER
 
 String display_panel_rev_string(void) {

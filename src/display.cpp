@@ -73,6 +73,8 @@ static void display_apply_light_sleep(uint8_t enabled) {
 #endif
 }
 
+static int panel_vcom = -1; // VCOM_DC code from the panel's OTP; -1 = leave the init lists as they are
+
 bool display_update_epaper(int refreshMode, bool wait, bool writePlane, uint8_t plane) {
 #if defined(BOARD_SEEED_RETERMINAL_E1002) || defined(BOARD_SEEED_RETERMINAL_E1004) || defined(BOARD_TRMNL_GEN2)
     // Light sleep with the WiFi radio running is unsupported
@@ -90,6 +92,12 @@ bool display_update_epaper(int refreshMode, bool wait, bool writePlane, uint8_t 
     Log_info("Can't do partial refresh, no previous image");
   } else if (refreshMode == REFRESH_PARTIAL) {
     Log_info("Have valid previous image in EPD memory, doing partial refresh");
+  }
+  if (refreshMode != REFRESH_FULL && panel_vcom >= 0 &&
+      bbep.getPanelType() == dpList[pDevice->panel_set][iTempProfile].OneBit) {
+    const uint8_t vcom = panel_vcom; // the fast and partial lists leave VCOM_DC at its -0.10 V reset value
+    bbep.writeCmd(0x82);
+    bbep.writeData((uint8_t *)&vcom, 1);
   }
   bbep.refresh(refreshMode, wait);
     // The next update can be a partial update because the current is 1-bpp and stays in the EPD RAM
@@ -153,6 +161,8 @@ void display_init(void) {
     panel_rev = get_panel_rev();
     panel_rev_read = true;
     Log_info("Panel ID = 0x%08x\n", panel_rev);
+    panel_vcom = get_panel_vcom(panel_rev);
+    Log_info("Panel VCOM code = %d", panel_vcom);
   }
   if (pDevice->epd_mosi_pin != 0 || pDevice->epd_sck_pin != 0) {
     bbep.setPanelType(dpList[pDevice->panel_set][iTempProfile].OneBit); // must be set BEFORE calling initio
